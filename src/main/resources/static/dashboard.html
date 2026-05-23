@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>短视频数据分析看板</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f0f2f5; color: #333; min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #fff; padding: 24px 40px; display: flex; align-items: center; gap: 16px;
+        }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header .badge { background: #e94560; font-size: 12px; padding: 2px 10px; border-radius: 10px; }
+
+        .tabs {
+            display: flex; gap: 0; background: #fff; border-radius: 12px 12px 0 0;
+            box-shadow: 0 -2px 8px rgba(0,0,0,.04); margin: 24px 24px 0 24px; overflow: hidden;
+        }
+        .tabs button {
+            flex: 1; padding: 14px; border: none; background: #fafafa; cursor: pointer;
+            font-size: 15px; color: #666; transition: all .2s; border-bottom: 2px solid transparent;
+        }
+        .tabs button:hover { background: #f0f0f0; }
+        .tabs button.active { background: #fff; color: #1a1a2e; border-bottom-color: #1a1a2e; font-weight: 600; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 0 24px 24px 24px; }
+        .panel { display: none; background: #fff; border-radius: 0 0 12px 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+        .panel.active { display: block; }
+
+        .query-bar { display: flex; gap: 12px; margin-bottom: 20px; }
+        .query-bar input {
+            flex: 1; border: 1px solid #d9d9d9; border-radius: 8px; padding: 10px 16px;
+            font-size: 15px; outline: none; transition: border-color .2s;
+        }
+        .query-bar input:focus { border-color: #1a1a2e; }
+        .query-bar button {
+            background: #1a1a2e; color: #fff; border: none; border-radius: 8px; padding: 10px 28px;
+            font-size: 15px; cursor: pointer; transition: opacity .2s; white-space: nowrap;
+        }
+        .query-bar button:hover { opacity: .85; }
+        .query-bar button:disabled { opacity: .5; cursor: not-allowed; }
+
+        /* Progress steps */
+        .progress-container { padding: 40px 20px; text-align: center; }
+        .progress-step {
+            display: flex; align-items: center; gap: 12px; padding: 10px 20px;
+            margin: 6px auto; max-width: 480px; border-radius: 8px;
+            background: #fafafa; color: #999; font-size: 14px; transition: all .3s;
+        }
+        .progress-step .step-icon {
+            width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 600; flex-shrink: 0;
+        }
+        .progress-step.pending .step-icon { background: #f0f0f0; color: #bbb; }
+        .progress-step.active {
+            background: #f0f5ff; color: #1a1a2e; font-weight: 500;
+        }
+        .progress-step.active .step-icon { background: #1a1a2e; color: #fff; animation: pulse 1s infinite; }
+        .progress-step.done { color: #52c41a; }
+        .progress-step.done .step-icon { background: #52c41a; color: #fff; }
+        .progress-step.failed { color: #f5222d; }
+        .progress-step.failed .step-icon { background: #f5222d; color: #fff; }
+
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
+
+        /* Chat */
+        .chat-area { min-height: 400px; max-height: 600px; overflow-y: auto; padding: 12px; background: #fafafa; border-radius: 8px; margin-bottom: 16px; }
+        .chat-msg { margin-bottom: 12px; display: flex; }
+        .chat-msg.user { justify-content: flex-end; }
+        .chat-msg .bubble {
+            max-width: 75%; padding: 10px 16px; border-radius: 16px; font-size: 14px; line-height: 1.6;
+        }
+        .chat-msg.user .bubble { background: #1a1a2e; color: #fff; border-radius: 16px 4px 16px 16px; }
+        .chat-msg.assistant .bubble { background: #fff; color: #333; border: 1px solid #e8e8e8; border-radius: 4px 16px 16px 16px; }
+        .chat-msg .bubble .streaming-cursor { display: inline-block; width: 2px; height: 16px; background: #1a1a2e; animation: blink .8s infinite; margin-left: 2px; vertical-align: middle; }
+        @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+        .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+        .summary-card { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 24px; border: 1px solid #f0f0f0; line-height: 1.8; font-size: 15px; }
+        .metrics-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr));
+            gap: 16px; margin-bottom: 24px;
+        }
+        .metric-card {
+            background: #fff; border-radius: 12px; padding: 20px; border: 1px solid #f0f0f0;
+            text-align: center; transition: transform .15s;
+        }
+        .metric-card:hover { transform: translateY(-2px); }
+        .metric-card .name { font-size: 13px; color: #888; margin-bottom: 6px; }
+        .metric-card .value { font-size: 28px; font-weight: 700; color: #1a1a2e; }
+        .metric-card .unit { font-size: 14px; color: #888; margin-left: 2px; }
+        .metric-card .change { font-size: 13px; margin-top: 4px; font-weight: 500; }
+        .metric-card .change.up { color: #f5222d; }
+        .metric-card .change.down { color: #52c41a; }
+        .metric-card .change.stable { color: #faad14; }
+
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+        .chart-card { background: #fff; border-radius: 12px; padding: 20px; border: 1px solid #f0f0f0; }
+        .chart-card .chart-box { width: 100%; height: 300px; }
+
+        .recommendations {
+            background: #fff; border-radius: 12px; padding: 24px; border: 1px solid #f0f0f0; margin-bottom: 24px;
+        }
+        .recommendations ul { list-style: none; }
+        .recommendations li {
+            padding: 10px 0 10px 24px; border-bottom: 1px solid #f0f0f0;
+            position: relative; line-height: 1.6;
+        }
+        .recommendations li:last-child { border-bottom: none; }
+        .recommendations li::before {
+            content: "●"; position: absolute; left: 0; color: #e94560; font-size: 10px; top: 13px;
+        }
+        .error-card { background: #fff2f0; border: 1px solid #ffccc7; border-radius: 12px; padding: 24px; color: #cf1322; text-align: center; }
+
+        @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>短视频数据分析看板</h1>
+        <span class="badge">AI Agent</span>
+    </div>
+
+    <div class="tabs">
+        <button class="active" onclick="switchTab('analyze')">📊 分析报告</button>
+        <button onclick="switchTab('chat')">💬 对话</button>
+        <button onclick="switchTab('admin')">⚙️ 运维</button>
+    </div>
+
+    <!-- Analyze Panel -->
+    <div class="container">
+        <div id="analyzePanel" class="panel active">
+            <div class="query-bar">
+                <input id="queryInput" type="text" placeholder="输入分析问题，如：分析国庆期间各分类视频的完播率和播放量变化" autofocus>
+                <button id="submitBtn" onclick="analyze()">分析</button>
+            </div>
+            <div id="resultArea"></div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div id="chatPanel" class="panel">
+            <div class="chat-area" id="chatArea">
+                <div style="text-align:center;color:#bbb;padding:40px 0;">输入问题开始对话，如：国庆期间美食视频和游戏视频的完播率对比</div>
+            </div>
+            <div class="query-bar">
+                <input id="chatInput" type="text" placeholder="输入消息..." onkeydown="if(event.key==='Enter') sendChat()">
+                <button id="chatBtn" onclick="sendChat()">发送</button>
+            </div>
+        </div>
+
+        <!-- Admin Panel -->
+        <div id="adminPanel" class="panel">
+            <div style="display:flex;gap:12px;margin-bottom:16px">
+                <button onclick="refreshStats()" style="background:#1a1a2e;color:#fff;border:none;border-radius:8px;padding:10px 20px;cursor:pointer">🔄 刷新</button>
+                <button onclick="clearCache()" style="background:#f5222d;color:#fff;border:none;border-radius:8px;padding:10px 20px;cursor:pointer">🗑 清空缓存</button>
+                <button onclick="clearTokens()" style="background:#fa8c16;color:#fff;border:none;border-radius:8px;padding:10px 20px;cursor:pointer">🗑 清空记录</button>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+                <div style="background:#fafafa;border-radius:8px;padding:16px">
+                    <div style="font-weight:600;margin-bottom:8px">缓存</div>
+                    <div id="adminCache" style="font-size:14px;color:#666">加载中...</div>
+                </div>
+                <div style="background:#fafafa;border-radius:8px;padding:16px">
+                    <div style="font-weight:600;margin-bottom:8px">Token 统计</div>
+                    <div id="adminTokens" style="font-size:14px;color:#666">加载中...</div>
+                </div>
+            </div>
+
+            <div style="background:#fafafa;border-radius:8px;padding:16px">
+                <div style="font-weight:600;margin-bottom:8px">最近调用记录</div>
+                <div id="adminRecent" style="font-size:13px;color:#666">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentAbortController = null;
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            const idx = tab === 'analyze' ? 1 : tab === 'chat' ? 2 : 3;
+            document.querySelector(`.tabs button:nth-child(${idx})`).classList.add('active');
+            document.getElementById(tab + 'Panel').classList.add('active');
+            if (tab === 'chat') document.getElementById('chatInput').focus();
+            else if (tab === 'admin') refreshStats();
+            else document.getElementById('queryInput').focus();
+        }
+
+        /* ==================== Admin ==================== */
+
+        async function refreshStats() {
+            document.getElementById('adminCache').textContent = '加载中...';
+            document.getElementById('adminTokens').textContent = '加载中...';
+            document.getElementById('adminRecent').textContent = '加载中...';
+            try {
+                const res = await fetch('/api/agent/admin/stats');
+                const data = await res.json();
+                document.getElementById('adminCache').innerHTML = `
+                    <div>条数: ${data.cache.size}</div>
+                    <div>阈值: ${data.cache.threshold}</div>`;
+                document.getElementById('adminTokens').innerHTML = `
+                    <div>总调用: ${data.tokens.totalCalls}</div>
+                    <div>Prompt: ${data.tokens.totalPromptTokens}</div>
+                    <div>Completion: ${data.tokens.totalCompletionTokens}</div>
+                    <div>总计: ${data.tokens.totalTokens}</div>
+                    <div>费用: $${data.tokens.totalCostUsd}</div>
+                    <div>缓存命中: ${data.tokens.cachedCount}</div>
+                    <div>非缓存: ${data.tokens.uncachedCount}</div>`;
+            } catch(e) {
+                document.getElementById('adminCache').textContent = '获取失败: ' + e.message;
+            }
+            try {
+                const res = await fetch('/api/agent/admin/recent');
+                const list = await res.json();
+                if (!list || list.length === 0) {
+                    document.getElementById('adminRecent').innerHTML = '<div style="color:#bbb">暂无记录</div>';
+                } else {
+                    document.getElementById('adminRecent').innerHTML = list.map(r =>
+                        `<div style="padding:4px 0;border-bottom:1px solid #f0f0f0;display:flex;gap:12px">
+                            <span style="color:#888;white-space:nowrap">${r.timestamp ? r.timestamp.substring(11,19) : ''}</span>
+                            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.query || ''}</span>
+                            <span style="color:#888">${r.model || ''}</span>
+                            <span>P:${r.promptTokens||0} C:${r.completionTokens||0}</span>
+                            <span style="color:${r.cached ? '#52c41a' : '#888'}">${r.cached ? 'CACHE' : ''}</span>
+                            <span>$${(r.cost || 0).toFixed(5)}</span>
+                        </div>`
+                    ).join('');
+                }
+            } catch(e) {
+                document.getElementById('adminRecent').textContent = '获取失败: ' + e.message;
+            }
+        }
+
+        async function clearCache() {
+            if (!confirm('确认清空语义缓存？')) return;
+            await fetch('/api/agent/admin/cache/clear', { method: 'POST' });
+            refreshStats();
+        }
+
+        async function clearTokens() {
+            if (!confirm('确认清空Token记录？')) return;
+            await fetch('/api/agent/admin/tokens/clear', { method: 'POST' });
+            refreshStats();
+        }
+
+        /* ==================== Analyze ==================== */
+
+        const STEPS = [
+            { label: '检索相关表结构', icon: '1' },
+            { label: '生成 SQL 并执行查询', icon: '2' },
+            { label: '校验数据合理性', icon: '3' },
+            { label: '分析评论 & 生成建议', icon: '4' },
+            { label: '生成结构化报告', icon: '5' }
+        ];
+
+        function analyze() {
+            const message = document.getElementById('queryInput').value.trim();
+            if (!message) return;
+            document.getElementById('submitBtn').disabled = true;
+            showProgress();
+
+            // 使用 EventSource (SSE) 接收实时进度事件
+            const url = `/api/agent/analyze-stream?userId=demo&message=${encodeURIComponent(message)}`;
+            const eventSource = new EventSource(url);
+
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'progress') {
+                        updateProgressFromSSE(data.message);
+                    } else if (data.type === 'complete') {
+                        eventSource.close();
+                        // complete 后立即用同步接口拿最终报告
+                        fetchResult(message);
+                    } else if (data.type === 'error') {
+                        eventSource.close();
+                        renderError(data.message || '分析出错');
+                        document.getElementById('submitBtn').disabled = false;
+                    }
+                } catch (e) {
+                    // SSE 的第一行是连接确认，忽略非 JSON 消息
+                }
+            };
+
+            eventSource.onerror = function() {
+                eventSource.close();
+                // fallback: 如果 SSE 不可用（如 404），走同步接口
+                fetchResult(message);
+            };
+        }
+
+        async function fetchResult(message) {
+            try {
+                const response = await fetch(`/api/agent/analyze?userId=demo&message=${encodeURIComponent(message)}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const report = await response.json();
+                renderReport(report);
+            } catch (err) {
+                renderError(err.message);
+            } finally {
+                document.getElementById('submitBtn').disabled = false;
+            }
+        }
+
+        const STEP_MAP = {
+            'schema': 0, 'sql': 1, 'validate': 2,
+            'parallel': 3, 'merge': 4, 'complete': 4
+        };
+
+        function updateProgressFromSSE(msg) {
+            const step = msg.split(':')[0];
+            const label = msg.substring(msg.indexOf(':') + 1);
+            const idx = STEP_MAP[step];
+            if (idx === undefined) return;
+
+            // 更新当前步骤为 active
+            const cur = document.getElementById('step_' + idx);
+            if (cur) { cur.classList.remove('pending'); cur.classList.add('active'); }
+
+            // 将前一步标记为 done
+            if (idx > 0) {
+                const prev = document.getElementById('step_' + (idx - 1));
+                if (prev) { prev.classList.remove('active'); prev.classList.add('done'); }
+            }
+
+            // 如果 complete，标记最后一步为 done
+            if (step === 'complete') {
+                const last = document.getElementById('step_' + idx);
+                if (last) { last.classList.remove('active'); last.classList.add('done'); }
+            }
+        }
+
+        function showProgress() {
+            let html = '<div class="progress-container">';
+            STEPS.forEach((s, i) => {
+                html += `<div class="progress-step pending" id="step_${i}">
+                    <span class="step-icon">${s.icon}</span>
+                    <span>${s.label}</span>
+                </div>`;
+            });
+            html += '</div>';
+            document.getElementById('resultArea').innerHTML = html;
+        }
+
+        function renderReport(report) {
+            document.querySelectorAll('.progress-step').forEach(el => {
+                el.classList.remove('active');
+                if (!el.classList.contains('failed')) el.classList.add('done');
+            });
+
+            if (!report || report.error) { renderError(report?.error || '返回数据为空'); return; }
+            console.log('Report charts:', JSON.stringify(report.charts));
+
+            let html = '';
+            if (report.summary) html += `<div class="summary-card"><div class="section-title">📊 分析摘要</div>${report.summary}</div>`;
+
+            if (report.metrics && report.metrics.length > 0) {
+                html += '<div class="section-title">📈 核心指标</div><div class="metrics-grid">';
+                report.metrics.forEach(m => {
+                    html += `<div class="metric-card">
+                        <div class="name">${m.name}</div>
+                        <div><span class="value">${typeof m.value === 'number' ? m.value.toFixed(2) : m.value}</span><span class="unit">${m.unit || ''}</span></div>
+                    </div>`;
+                });
+                html += '</div>';
+            }
+
+            if (report.charts && report.charts.length > 0) {
+                html += '<div class="section-title">📉 可视化图表</div><div class="charts-grid">';
+                report.charts.forEach((chart, i) => {
+                    html += `<div class="chart-card"><div style="font-size:14px;font-weight:500;margin-bottom:8px">${chart.title || ''}</div><div class="chart-box" id="chart_${i}"></div></div>`;
+                });
+                html += '</div>';
+            }
+
+            if (report.recommendations && report.recommendations.length > 0) {
+                html += '<div class="section-title">💡 建议</div><div class="recommendations"><ul>';
+                report.recommendations.forEach(r => html += `<li>${r}</li>`);
+                html += '</ul></div>';
+            }
+
+            document.getElementById('resultArea').innerHTML = html;
+
+            if (report.charts) {
+                setTimeout(() => {
+                    report.charts.forEach((chart, i) => {
+                        const el = document.getElementById(`chart_${i}`);
+                        if (el) renderChart(el, chart);
+                    });
+                }, 50);
+            }
+        }
+
+        function renderChart(el, chart) {
+            const raw = chart.data || [];
+            console.log('Chart raw data:', JSON.stringify(raw));
+            if (raw.length === 0) { console.warn('Empty chart data'); return; }
+
+            const labels = [...new Set(raw.map(d => d.label))];
+            const cats = [...new Set(raw.filter(d => d.category).map(d => d.category))];
+            // 判断 category 是否为真正的分组维度：
+            // 如果每个 category 分组都只有 1 个数据点（如 W40:1, W41:1, W42:1），
+            // 说明 AI 把 category 当成了数据点标识符而非分组维度，应忽略 category
+            const countPerCat = {};
+            for (const d of raw) {
+                const k = d.category || '_none';
+                countPerCat[k] = (countPerCat[k] || 0) + 1;
+            }
+            const allGroupsHaveOne = Object.values(countPerCat).every(c => c === 1);
+
+            function groupByCategory() {
+                const result = {};
+                for (const d of raw) {
+                    const key = allGroupsHaveOne ? '_single' : (d.category || '_single');
+                    if (!result[key]) result[key] = [];
+                    result[key].push(d.value);
+                }
+                return result;
+            }
+
+            const instance = echarts.init(el);
+
+            if (chart.type === 'pie') {
+                instance.setOption({
+                    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                    series: [{ type: 'pie', radius: ['30%','60%'], data: raw.map(d => ({ name: d.label, value: d.value })) }]
+                });
+                window.addEventListener('resize', () => instance.resize());
+                return;
+            }
+
+            const groups = groupByCategory();
+            const series = Object.keys(groups).map(k => ({
+                name: k === '_single' ? undefined : k,
+                type: chart.type === 'bar' ? 'bar' : 'line',
+                data: groups[k]
+            }));
+            const opt = { tooltip: { trigger: 'axis' }, xAxis: { type: 'category', data: labels }, yAxis: { type: 'value' }, series };
+            if (Object.keys(groups).length > 1) { opt.legend = {}; if (chart.type === 'bar') opt.barGap = '30%'; }
+            instance.setOption(opt);
+            window.addEventListener('resize', () => instance.resize());
+        }
+
+        function renderError(msg) {
+            document.getElementById('resultArea').innerHTML = `<div class="error-card">❌ 分析出错：${msg}</div>`;
+        }
+
+        /* ==================== Chat = 复用分析管线 ==================== */
+
+        async function sendChat() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+            input.value = '';
+            document.getElementById('chatBtn').disabled = true;
+
+            const area = document.getElementById('chatArea');
+            area.innerHTML = `<div class="chat-msg user"><div class="bubble">${escapeHtml(msg)}</div></div>`;
+
+            // 显示进度
+            const progressDiv = document.createElement('div');
+            progressDiv.innerHTML = '<div class="progress-container">' +
+                STEPS.map((s, i) =>
+                    `<div class="progress-step pending" id="chat_step_${i}">
+                        <span class="step-icon">${s.icon}</span><span>${s.label}</span>
+                    </div>`
+                ).join('') + '</div>';
+            area.appendChild(progressDiv);
+
+            // 用分析管线获取报告
+            const url = `/api/agent/analyze-stream?userId=demo&message=${encodeURIComponent(msg)}`;
+            const es = new EventSource(url);
+
+            es.onmessage = function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'progress') {
+                        const step = data.message.split(':')[0];
+                        const idx = STEP_MAP[step];
+                        if (idx !== undefined) {
+                            const el = document.getElementById('chat_step_' + idx);
+                            if (el) { el.classList.remove('pending'); el.classList.add('active'); }
+                            if (idx > 0) {
+                                const prev = document.getElementById('chat_step_' + (idx - 1));
+                                if (prev) { prev.classList.remove('active'); prev.classList.add('done'); }
+                            }
+                            if (step === 'complete') {
+                                const last = document.getElementById('chat_step_' + idx);
+                                if (last) { last.classList.remove('active'); last.classList.add('done'); }
+                            }
+                        }
+                    } else if (data.type === 'complete') {
+                        es.close();
+                        fetchChatReport(msg, area);
+                    } else if (data.type === 'error') {
+                        es.close();
+                        area.innerHTML += `<div class="error-card">❌ ${data.message || '分析出错'}</div>`;
+                        document.getElementById('chatBtn').disabled = false;
+                    }
+                } catch(e) {}
+            };
+            es.onerror = function() {
+                es.close();
+                fetchChatReport(msg, area);
+            };
+        }
+
+        async function fetchChatReport(msg, area) {
+            try {
+                const resp = await fetch(`/api/agent/analyze?userId=demo&message=${encodeURIComponent(msg)}`);
+                const report = await resp.json();
+                area.innerHTML = ''; // 清除进度
+                // 添加用户消息
+                area.innerHTML += `<div class="chat-msg user"><div class="bubble">${escapeHtml(msg)}</div></div>`;
+                // 渲染报告摘要
+                let html = '<div class="chat-msg assistant"><div class="bubble">';
+                if (report.summary) html += report.summary;
+                html += '</div></div>';
+                if (report.metrics && report.metrics.length > 0) {
+                    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:12px 0">';
+                    report.metrics.forEach(m => {
+                        html += `<div style="background:#fafafa;border-radius:8px;padding:12px;text-align:center">
+                            <div style="font-size:12px;color:#888">${m.name}</div>
+                            <div style="font-size:24px;font-weight:700">${typeof m.value === 'number' ? m.value.toFixed(2) : m.value}</div>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+                if (report.recommendations && report.recommendations.length > 0) {
+                    html += '<div style="margin-top:12px"><ul style="list-style:none;padding:0">';
+                    report.recommendations.forEach(r => html += `<li style="padding:4px 0 4px 16px;position:relative;font-size:14px">● ${r}</li>`);
+                    html += '</ul></div>';
+                }
+                area.innerHTML += html;
+            } catch(err) {
+                area.innerHTML += `<div class="error-card">❌ 请求失败: ${err.message}</div>`;
+            } finally {
+                document.getElementById('chatBtn').disabled = false;
+                area.scrollTop = area.scrollHeight;
+            }
+        }
+
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: video_data_analysis
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/video_data_analysis?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  ai:
+    openai:
+      base-url: ${AI_BASE_URL:https://api.deepseek.com}
+      api-key: ${AI_API_KEY:sk-68a21362474b4f78ab86d07a777799ba}
+      chat:
+        options:
+          model: ${AI_MODEL:deepseek-chat}
+    vectorstore:
+      redis:
+        index: "video_analysis_idx"
+        prefix: "vector:"
+    chat:
+      client:
+        enabled: true
+        observations:
+          log-prompt: true
+          log-completion: true
+
+app:
+  ai:
+    strong-model: ${AI_STRONG_MODEL:deepseek-chat}
+    cheap-model: ${AI_CHEAP_MODEL:deepseek-chat}
+  embedding:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_EMBED_MODEL:nomic-embed-text}
+  cache:
+    similarity-threshold: 0.92
+    ttl-minutes: 60
+    evict-interval-minutes: 10
+    sql-ttl-minutes: 5
+
+logging:
+  level:
+    org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor: DEBUG
