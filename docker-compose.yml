@@ -1,0 +1,24 @@
+services:
+  mysql:
+    image: mysql:8
+    ports: ["3306:3306"]
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: video_data_analysis
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis/redis-stack-server:latest
+    ports: ["6379:6379"]
+
+  ollama:
+    image: ollama/ollama
+    ports: ["11434:11434"]
+    entrypoint: ["sh", "-c", "ollama serve & sleep 3 && ollama pull nomic-embed-text && wait"]
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  mysql_data:
+  ollama_data:
