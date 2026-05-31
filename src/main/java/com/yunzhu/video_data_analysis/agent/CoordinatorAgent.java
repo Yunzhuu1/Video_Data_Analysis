@@ -7,9 +7,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -55,6 +57,7 @@ public class CoordinatorAgent {
     private final RecommendationAgent recommendationAgent;
     private final ChatClient validator;
     private final Executor agentExecutor;
+    private final JdbcTemplate jdbcTemplate;
 
     public CoordinatorAgent(SchemaAgent schemaAgent,
                             SQLGenerationAgent sqlGenerationAgent,
@@ -62,7 +65,8 @@ public class CoordinatorAgent {
                             InsightAgent insightAgent,
                             RecommendationAgent recommendationAgent,
                             @Qualifier("agentTaskExecutor") Executor agentExecutor,
-                            @Qualifier("cheapChatModel") ChatModel cheapChatModel) {
+                            @Qualifier("cheapChatModel") ChatModel cheapChatModel,
+                            JdbcTemplate jdbcTemplate) {
         this.schemaAgent = schemaAgent;
         this.sqlGenerationAgent = sqlGenerationAgent;
         this.ragAgent = ragAgent;
@@ -72,6 +76,7 @@ public class CoordinatorAgent {
         this.validator = ChatClient.builder(cheapChatModel)
                 .defaultSystem("你是SQL质量评审。判断查询结果是否合理。")
                 .build();
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     public AnalysisReport analyze(String userId, String question) {
@@ -83,17 +88,17 @@ public class CoordinatorAgent {
 
         // 步骤1：Schema裁剪（廉价，顺序执行）
         accept(onProgress, "schema:正在检索相关表结构...");
-        log.info("[1/5] SchemaAgent (cheap) pruning schema...");
+        log.info("[1/6] SchemaAgent (cheap) pruning schema...");
         String schemaContext = schemaAgent.identify(question);
 
         // 步骤2：SQL生成和执行（强大，顺序执行）
         accept(onProgress, "sql:正在生成并执行SQL...");
-        log.info("[2/5] SQLGenerationAgent (strong) executing SQL...");
+        log.info("[2/6] SQLGenerationAgent (strong) executing SQL...");
         String queryResult = sqlGenerationAgent.execute(question, schemaContext);
 
         // 步骤3：执行指导 — 验证SQL结果，如果可疑则重新执行
         accept(onProgress, "validate:正在校验数据合理性...");
-        log.info("[3/5] Execution Guidance — validating SQL result...");
+        log.info("[3/6] Execution Guidance — validating SQL result...");
         String feedback = validateResult(question, queryResult);
         if (feedback != null) {
             log.warn("Execution Guidance triggered: {}", feedback);
@@ -102,12 +107,19 @@ public class CoordinatorAgent {
             log.info("Execution Guidance: result looks reasonable, proceeding");
         }
 
+        // 步骤4：交叉验证 — 查 play_detail 验证评论中的广告/跳出指控
+        accept(onProgress, "cross-ref:正在交叉验证归因...");
+        log.info("[4/6] Cross-validation — verifying attribution with play_detail...");
+        String crossValidation = crossValidate(queryResult);
+        log.debug("Cross-validation result: {}", truncate(crossValidation, 150));
+
         // 最终结果 — 对下面的lambda必须是effectively final
         String finalQueryResult = queryResult;
+        String finalCrossValidation = crossValidation;
 
-        // 步骤4：并行扇出
+        // 步骤5：并行扇出
         accept(onProgress, "parallel:正在分析评论与生成报告...");
-        log.info("[4/5] Parallel: RAGAgent (cheap) + InsightAgent (strong) + RecAgent (cheap)");
+        log.info("[5/6] Parallel: RAGAgent (cheap) + InsightAgent (strong) + RecAgent (cheap)");
 
         CompletableFuture<CommentResult> ragFuture = CompletableFuture
                 .supplyAsync(() -> ragAgent.analyze(question, finalQueryResult), agentExecutor)
@@ -119,7 +131,7 @@ public class CoordinatorAgent {
 
         CompletableFuture<AnalysisReport> insightFuture = ragFuture
                 .thenCompose(ragResult -> CompletableFuture
-                        .supplyAsync(() -> insightAgent.analyze(question, finalQueryResult, schemaContext, ragResult),
+                        .supplyAsync(() -> insightAgent.analyze(question, finalQueryResult, schemaContext, ragResult, finalCrossValidation),
                                 agentExecutor)
                         .orTimeout(60, TimeUnit.SECONDS))
                 .exceptionally(ex -> {
@@ -173,6 +185,56 @@ public class CoordinatorAgent {
             return answer.trim().substring(5).trim();
         }
         return null; // PASS
+    }
+
+    /**
+     * 交叉验证：查询 play_detail 中的跳出点，验证 RAG 评论中的归因指控。
+     * 如果 RAG 说"广告太多"，这里会查实际跳出时间点是否集中在广告插入位。
+     */
+    private String crossValidate(String queryResult) {
+        try {
+            // 1. 按分类统计跳出时间点的分布
+            List<Map<String, Object>> dropOffs = jdbcTemplate.queryForList(
+                    "SELECT cd.category, ROUND(AVG(pd.drop_off_second)) as avg_drop_off, "
+                    + "COUNT(*) as play_count, ROUND(AVG(pd.completion_rate),2) as avg_completion "
+                    + "FROM play_detail pd JOIN content_dim cd ON pd.content_id = cd.content_id "
+                    + "GROUP BY cd.category");
+            if (dropOffs.isEmpty()) return "";
+
+            // 2. 美食类视频的广告跳出率（验证"广告太多"指控）
+            List<Map<String, Object>> foodDrop = jdbcTemplate.queryForList(
+                    "SELECT COUNT(CASE WHEN pd.drop_off_second BETWEEN 10 AND 25 THEN 1 END) * 100.0 / COUNT(*) as ad_zone_drop_rate "
+                    + "FROM play_detail pd JOIN content_dim cd ON pd.content_id = cd.content_id "
+                    + "WHERE cd.category = '美食'");
+            Map<String, Object> foodRow = foodDrop.isEmpty() ? Map.of() : foodDrop.get(0);
+
+            // 3. 对比美食 vs 非美食的完播率
+            List<Map<String, Object>> completionComp = jdbcTemplate.queryForList(
+                    "SELECT cd.category, ROUND(AVG(pd.completion_rate),2) as avg_comp "
+                    + "FROM play_detail pd JOIN content_dim cd ON pd.content_id = cd.content_id "
+                    + "GROUP BY cd.category ORDER BY avg_comp");
+
+            StringBuilder sb = new StringBuilder("【播放数据交叉验证】\n");
+            sb.append("各分类跳出时间:\n");
+            for (var row : dropOffs) {
+                sb.append("  ").append(row.get("category")).append(": 平均跳出")
+                  .append(row.get("avg_drop_off")).append("s, 完播率")
+                  .append(row.get("avg_completion")).append("%\n");
+            }
+            if (foodRow.get("ad_zone_drop_rate") != null) {
+                sb.append("美食类广告区间(10-25s)跳出占比: ")
+                  .append(String.format("%.1f%%", foodRow.get("ad_zone_drop_rate"))).append("\n");
+            }
+            sb.append("完播率排名:\n");
+            int rank = 1;
+            for (var row : completionComp) {
+                sb.append("  ").append(rank++).append(". ").append(row.get("category"))
+                  .append(": ").append(row.get("avg_comp")).append("%\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static AnalysisReport fallbackReport(String question, String queryResult) {

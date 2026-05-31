@@ -5,8 +5,7 @@ import java.util.List;
 
 /**
  * 来自 {@code RAGAgent} 评论分析的结构化结果。
- * 由 {@code InsightAgent} 消费，以便在归因分析中
- * 添加用户反馈证据。
+ * 由 {@code InsightAgent} 消费，以便在归因分析中添加用户反馈证据。
  */
 public class CommentResult {
 
@@ -24,6 +23,10 @@ public class CommentResult {
 
     @JsonProperty("summary")
     private String summary;
+
+    /** 可信度 0.0-1.0，由 Self-Reflection 给出。越低表示证据越弱，InsightAgent 应谨慎引用。 */
+    @JsonProperty("confidence")
+    private double confidence = 1.0;
 
     public CommentResult() {}
 
@@ -46,4 +49,6 @@ public class CommentResult {
     public void setRepresentativeComments(List<String> representativeComments) { this.representativeComments = representativeComments; }
     public String getSummary() { return summary; }
     public void setSummary(String summary) { this.summary = summary; }
+    public double getConfidence() { return confidence; }
+    public void setConfidence(double confidence) { this.confidence = confidence; }
 }

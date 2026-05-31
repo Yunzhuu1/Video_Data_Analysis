@@ -23,7 +23,7 @@ public class InsightAgent {
     private static final String SYSTEM_PROMPT = """
             数据分析师。生成结构化JSON报告。
             总结发现→异常归因→生成图表配置(line/bar/pie)。
-            有【用户评论分析】时融入归因段落。
+            有【用户评论分析】时融入归因段落。confidence<0.5表示证据较弱，可选择性引用。
             不含建议(另有专家)。不含图表外的多余文字。
             """;
 
@@ -36,10 +36,12 @@ public class InsightAgent {
     }
 
     public AnalysisReport analyze(String question, String queryResult,
-                                   String schemaContext, CommentResult commentResult) {
+                                   String schemaContext, CommentResult commentResult,
+                                   String crossValidation) {
         String ragSection = formatRagContext(commentResult);
+        boolean hasCrossVal = crossValidation != null && !crossValidation.isEmpty();
         log.info("InsightAgent (strong) generating report{}",
-                ragSection.isEmpty() ? "" : " (with RAG context)");
+                ragSection.isEmpty() ? "" : " (with RAG context)" + (hasCrossVal ? " + cross-validation" : ""));
 
         return chatClient.prompt()
                 .user(u -> u.text("""
@@ -53,13 +55,19 @@ public class InsightAgent {
 
                         {rag}
 
-                        请基于以上数据生成结构化分析报告。
-                        如果存在用户评论分析，请将其中的发现融入归因分析。
+                        {cross}
+
+                        归因时请遵循以下准则：
+                        1. 优先使用交叉验证数据验证评论中的指控
+                        2. 如果交叉验证表明某个分类的跳出点集中在广告区间，确认归因为广告影响
+                        3. 完播率排名说明各分类的相对表现
+                        4. 如果评论分析和交叉验证数据冲突，以交叉验证为准
                         """)
                         .param("question", question)
                         .param("data", queryResult)
                         .param("schema", schemaContext)
-                        .param("rag", ragSection))
+                        .param("rag", ragSection)
+                        .param("cross", hasCrossVal ? crossValidation : ""))
                 .call()
                 .entity(AnalysisReport.class);
     }
@@ -70,6 +78,7 @@ public class InsightAgent {
         }
         StringBuilder sb = new StringBuilder("【用户评论分析】\n");
         sb.append("核心主题: ").append(String.join("、", cr.getThemes())).append("\n");
+        sb.append("可信度: ").append(String.format("%.1f", cr.getConfidence())).append(" (0-1，越高越可信)\n");
         sb.append("负面评论占比: ").append(String.format("%.0f%%", cr.getNegativeRatio() * 100)).append("\n");
         if (cr.getRepresentativeComments() != null && !cr.getRepresentativeComments().isEmpty()) {
             sb.append("代表性评论:\n");

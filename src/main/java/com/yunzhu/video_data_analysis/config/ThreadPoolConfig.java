@@ -29,8 +29,8 @@ public class ThreadPoolConfig {
     public Executor agentTaskExecutor() {
         int cores = Runtime.getRuntime().availableProcessors();
         return new ThreadPoolExecutor(
-                cores,                      // corePoolSize — 基线线程数
-                cores * 2,                  // maximumPoolSize — 突发容量
+                cores * 2,                  // corePoolSize — 基线线程数（×2 加速rerank并发）
+                cores * 4,                  // maximumPoolSize — 突发容量
                 60L, TimeUnit.SECONDS,      // keepAliveTime — 空闲线程保留时间
                 new LinkedBlockingQueue<>(200), // 有界队列防止OOM
                 new NamedThreadFactory("agent-task"),

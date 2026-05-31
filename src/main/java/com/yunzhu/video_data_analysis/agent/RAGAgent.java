@@ -37,7 +37,7 @@ public class RAGAgent {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final String DOC_TYPE = "comment";
-    private static final int MILVUS_TOP_K = 20;
+    private static final int MILVUS_TOP_K = 10;
     private static final int RERANK_TOP_K = 5;
 
     /* ==================== 提示词 ==================== */
@@ -115,15 +115,12 @@ public class RAGAgent {
         List<Document> topComments = rerank(question, queryResult, candidates);
         log.info("RAGAgent: reranked top-{} from {} candidates", topComments.size(), candidates.size());
 
-        // 阶段3：自我反思
-        log.info("RAGAgent: stage 3/3 — self-reflection");
+        // 阶段3：自我反思（软信号——不再拦截结果，而是给出可信度）
+        log.info("RAGAgent: stage 3/3 — self-reflection (soft gate)");
         CommentResult result = extractThemes(question, queryResult, topComments);
 
-        boolean pass = reflect(question, result);
-        if (!pass) {
-            log.info("RAGAgent: self-reflection FAILED — themes insufficient to explain the question");
-            return emptyResult();
-        }
+        double confidence = measureConfidence(question, result);
+        result.setConfidence(confidence);
 
         long negativeCount = topComments.stream()
                 .filter(d -> "negative".equals(d.getMetadata().get("sentiment")))
@@ -137,8 +134,8 @@ public class RAGAgent {
                         .map(Document::getText)
                         .collect(Collectors.toList()));
 
-        log.info("RAGAgent complete | themes={} | negativeRatio={} | passedReflection=true",
-                result.getThemes(), result.getNegativeRatio());
+        log.info("RAGAgent complete | themes={} | negativeRatio={} | confidence={}",
+                result.getThemes(), result.getNegativeRatio(), String.format("%.2f", confidence));
         return result;
     }
 
@@ -196,10 +193,14 @@ public class RAGAgent {
 
     private record ScoredDoc(Document doc, int score) {}
 
-    /* ==================== 阶段3：自我反思 ==================== */
+    /* ==================== 阶段3：自我反思（软信号） ==================== */
 
-    private boolean reflect(String question, CommentResult result) {
-        if (result.getThemes() == null || result.getThemes().isEmpty()) return false;
+    /**
+     * 衡量评论证据的可信度 0.0-1.0。
+     * 不再做硬拦截（false = 丢弃结果），而是由 InsightAgent 根据置信度自行判断。
+     */
+    private double measureConfidence(String question, CommentResult result) {
+        if (result.getThemes() == null || result.getThemes().isEmpty()) return 0.0;
         try {
             String answer = chatClient.prompt()
                     .user(u -> u.text(REFLECT_PROMPT)
@@ -208,9 +209,10 @@ public class RAGAgent {
                             .param("negativeRatio", String.format("%.2f", result.getNegativeRatio())))
                     .call()
                     .content();
-            return answer != null && answer.trim().toLowerCase().contains("true");
+            boolean pass = answer != null && answer.trim().toLowerCase().contains("true");
+            return pass ? 0.8 : 0.3; // 通过=0.8, 不通过=0.3（仍保留证据给下游判断）
         } catch (Exception e) {
-            return true; // 容错：反思失败时默认放行
+            return 0.5; // 容错：未知时给中等可信度
         }
     }
 
@@ -246,7 +248,9 @@ public class RAGAgent {
     }
 
     private static CommentResult emptyResult() {
-        return new CommentResult(List.of(), 0, 0.0, List.of(), "暂无评论数据");
+        CommentResult r = new CommentResult(List.of(), 0, 0.0, List.of(), "暂无评论数据");
+        r.setConfidence(0.0);
+        return r;
     }
 
     private static String truncate(String s, int max) {

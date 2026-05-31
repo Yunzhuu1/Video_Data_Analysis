@@ -101,6 +101,9 @@ public class DataInitializer implements CommandLineRunner {
         createMetricDailyTable();
         insertUserBehaviorFact();
         insertMetricDaily();
+        extendContentDim();
+        createPlayDetailTable();
+        insertPlayDetail();
         seedComments();
         loadCommentsIntoMilvus();
 
@@ -399,6 +402,78 @@ public class DataInitializer implements CommandLineRunner {
             log.info("  comment_content: {} 条评论已注入", batch.size());
         } catch (Exception e) {
             log.warn("  comment_content 注入失败: {}", e.getMessage());
+        }
+    }
+
+    /* ==================== 归因交叉验证数据 ==================== */
+
+    private void extendContentDim() {
+        jdbcTemplate.execute("ALTER TABLE content_dim ADD COLUMN IF NOT EXISTS ad_count INT DEFAULT 0");
+        jdbcTemplate.execute("ALTER TABLE content_dim ADD COLUMN IF NOT EXISTS ad_positions JSON");
+        // 为已有视频设置广告数据：美食类广告多且早，美妆类少量广告，游戏类无广告
+        jdbcTemplate.update("UPDATE content_dim SET ad_count=3, ad_positions='[12,30,55]' WHERE content_id IN ('content_5','content_6')");
+        jdbcTemplate.update("UPDATE content_dim SET ad_count=1, ad_positions='[50]' WHERE content_id IN ('content_1','content_2')");
+        jdbcTemplate.update("UPDATE content_dim SET ad_count=0, ad_positions='[]' WHERE content_id IN ('content_3','content_4')");
+        log.info("  content_dim: 广告字段已更新");
+    }
+
+    private void createPlayDetailTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS play_detail (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    user_id VARCHAR(64) NOT NULL,
+                    content_id VARCHAR(64) NOT NULL,
+                    play_duration INT NOT NULL COMMENT '实际观看时长(秒)',
+                    drop_off_second INT COMMENT '跳出时间点(秒)',
+                    completion_rate DECIMAL(5,2) COMMENT '完播率',
+                    created_at DATETIME NOT NULL
+                )
+                """);
+        log.info("  play_detail: 表已就绪");
+    }
+
+    private void insertPlayDetail() {
+        // 为每个用户每天的美食类播放生成播放明细
+        // 重点：美食类视频广告多(12s插入)，用户跳出集中在12-20秒区间
+        String sql = "INSERT IGNORE INTO play_detail (user_id, content_id, play_duration, drop_off_second, completion_rate, created_at) VALUES (?, ?, ?, ?, ?, ?)";
+        List<Object[]> batch = new ArrayList<>();
+
+        for (int day = 1; day <= 31; day++) {
+            for (int u = 1; u <= 20; u++) {
+                String userId = "user_" + u;
+                for (int ci = 0; ci < 6; ci++) {
+                    if (random.nextDouble() > 0.4) continue; // 60% 概率产生播放明细
+                    String contentId = CONTENTS[ci][0];
+                    int duration = Integer.parseInt(CONTENTS[ci][4]);
+                    boolean isFood = ci >= 4; // content_5, content_6 是美食
+
+                    // 美食视频：广告在12秒，跳出集中在12-20秒
+                    // 非美食：无广告或广告在末尾，跳出分布均匀
+                    int dropOff;
+                    if (isFood) {
+                        // 美食视频: 70% 概率在广告点附近跳出
+                        dropOff = random.nextDouble() < 0.7
+                                ? 12 + random.nextInt(15)  // 12-27秒跳出（第一支广告在12秒）
+                                : 10 + random.nextInt(duration - 20);
+                    } else {
+                        dropOff = 10 + random.nextInt(duration - 20);
+                    }
+
+                    int playDuration = Math.min(dropOff + random.nextInt(5), duration);
+                    double rate = duration > 0 ? (double) playDuration / duration * 100 : 0;
+
+                    LocalDateTime ts = randomTimestamp(2023, 10, day);
+                    batch.add(new Object[]{userId, contentId, playDuration, dropOff,
+                            Math.round(rate * 100.0) / 100.0, java.sql.Timestamp.valueOf(ts)});
+                }
+            }
+        }
+
+        try {
+            jdbcTemplate.batchUpdate(sql, batch);
+            log.info("  play_detail: {} 条播放明细已注入", batch.size());
+        } catch (Exception e) {
+            log.warn("  play_detail 注入失败: {}", e.getMessage());
         }
     }
 
