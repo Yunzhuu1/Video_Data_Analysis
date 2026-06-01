@@ -1,6 +1,5 @@
 package com.yunzhu.video_data_analysis.agent;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yunzhu.video_data_analysis.dto.CommentResult;
 import org.slf4j.Logger;
@@ -13,10 +12,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -71,16 +67,13 @@ public class RAGAgent {
 
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
-    private final Executor agentExecutor;
 
     public RAGAgent(@Qualifier("cheapChatModel") ChatModel chatModel,
-                    VectorStore vectorStore,
-                    @Qualifier("agentTaskExecutor") Executor agentExecutor) {
+                    VectorStore vectorStore) {
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultSystem("你是一个用户评论分析师。")
                 .build();
         this.vectorStore = vectorStore;
-        this.agentExecutor = agentExecutor;
     }
 
     /**
@@ -153,23 +146,18 @@ public class RAGAgent {
         return rewritten.trim();
     }
 
-    /* ==================== 阶段2：LLM重排序 ==================== */
+    /* ==================== 阶段2：LLM 重排序（10 路并发） ==================== */
 
-    /**
-     * 使用托管线程池而不是 {@code parallelStream()}（它使用ForkJoinPool.commonPool）来重排序候选项。
-     * 每个候选项通过 {@code CompletableFuture} 并发评分。
-     */
     private List<Document> rerank(String question, String queryResult, List<Document> candidates) {
-        List<CompletableFuture<ScoredDoc>> futures = candidates.stream()
-                .map(doc -> CompletableFuture.supplyAsync(
-                        () -> new ScoredDoc(doc, scoreComment(question, queryResult, doc)),
-                        agentExecutor))
+        List<java.util.concurrent.CompletableFuture<ScoredDoc>> futures = candidates.stream()
+                .map(doc -> java.util.concurrent.CompletableFuture.supplyAsync(
+                        () -> new ScoredDoc(doc, scoreComment(question, queryResult, doc))))
                 .collect(Collectors.toList());
 
         return futures.stream()
-                .map(CompletableFuture::join)
+                .map(java.util.concurrent.CompletableFuture::join)
                 .filter(sd -> sd.score >= 5)
-                .sorted(Comparator.<ScoredDoc>comparingInt(sd -> sd.score).reversed())
+                .sorted(java.util.Comparator.<ScoredDoc>comparingInt(sd -> sd.score).reversed())
                 .limit(RERANK_TOP_K)
                 .map(sd -> sd.doc)
                 .collect(Collectors.toList());

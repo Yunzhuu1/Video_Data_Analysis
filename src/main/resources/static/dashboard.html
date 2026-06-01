@@ -257,9 +257,10 @@
             { label: '检索相关表结构', icon: '1' },
             { label: '生成 SQL 并执行查询', icon: '2' },
             { label: '校验数据合理性', icon: '3' },
-            { label: '分析评论 & 生成建议', icon: '4' },
-            { label: '交叉验证归因', icon: '5' },
-            { label: '生成结构化报告', icon: '6' }
+            { label: '交叉验证归因', icon: '4' },
+            { label: '检索用户评论', icon: '5' },
+            { label: '生成分析与建议', icon: '6' },
+            { label: '生成结构化报告', icon: '7' }
         ];
 
         function analyze() {
@@ -313,7 +314,7 @@
 
         const STEP_MAP = {
             'schema': 0, 'sql': 1, 'validate': 2,
-            'cross-ref': 3, 'parallel': 4, 'merge': 5, 'complete': 5
+            'cross-ref': 3, 'rag': 4, 'parallel': 5, 'merge': 6, 'complete': 6
         };
 
         function updateProgressFromSSE(msg) {

@@ -15,7 +15,7 @@ services:
   ollama:
     image: ollama/ollama
     ports: ["11434:11434"]
-    entrypoint: ["sh", "-c", "ollama serve & sleep 3 && ollama pull nomic-embed-text && wait"]
+    entrypoint: ["sh", "-c", "ollama serve & sleep 3 && ollama pull nomic-embed-text && ollama pull bge-reranker-v2-m3 && wait"]
     volumes:
       - ollama_data:/root/.ollama
 

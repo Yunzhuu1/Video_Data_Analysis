@@ -144,10 +144,10 @@ public class DataInitializer implements CommandLineRunner {
         String sql = "INSERT IGNORE INTO user_dim (user_id, age, gender, region) VALUES (?, ?, ?, ?)";
         List<Object[]> batch = new ArrayList<>();
 
-        for (int i = 1; i <= 20; i++) {
+        for (int i = 1; i <= 50; i++) {
             batch.add(new Object[]{
                     "user_" + i,
-                    18 + random.nextInt(18),    // age 18-35
+                    18 + random.nextInt(18),
                     GENDERS[random.nextInt(2)],
                     REGIONS[random.nextInt(3)]
             });
@@ -224,11 +224,11 @@ public class DataInitializer implements CommandLineRunner {
             // 统计每天的事件总数用于日志记录
             int dayEventCount = 0;
 
-            for (int userIdx = 1; userIdx <= 20; userIdx++) {
+            for (int userIdx = 1; userIdx <= 50; userIdx++) {
                 String userId = "user_" + userIdx;
 
                 // --- 生成播放事件 ---
-                int basePlayCount = 2 + random.nextInt(3); // 2-4 plays baseline
+                int basePlayCount = 4 + random.nextInt(4); // 4-7 plays baseline
                 double playMultiplier = 1.0;
 
                 if (isActivityPeriod) {
@@ -358,43 +358,66 @@ public class DataInitializer implements CommandLineRunner {
         String sql = "INSERT IGNORE INTO comment_content (content_id, user_id, text, sentiment, created_at) VALUES (?, ?, ?, ?, ?)";
         List<Object[]> batch = new ArrayList<>();
 
-        // 美食类视频在活动期后的负面评论（10.08-10.10，完播率下降的归因线索）
-        String[][] foodNegativeComments = {
-                {"content_5", "user_1", "广告太长了，看到一半就划走了", "negative", "2023-10-08 12:30:00"},
-                {"content_5", "user_3", "中间插播广告太烦了", "negative", "2023-10-08 14:15:00"},
-                {"content_6", "user_5", "画质好糊啊，根本没兴趣看完", "negative", "2023-10-08 18:00:00"},
-                {"content_5", "user_7", "以前没广告的，现在怎么这么多广告", "negative", "2023-10-09 09:20:00"},
-                {"content_6", "user_2", "加载卡顿，体验很差", "negative", "2023-10-09 11:45:00"},
-                {"content_5", "user_8", "开头30秒全是广告，直接关了", "negative", "2023-10-09 15:30:00"},
-                {"content_6", "user_4", "视频内容挺好的，就是广告太影响体验了", "negative", "2023-10-10 10:00:00"},
-                {"content_5", "user_9", "最近广告越来越多，不看了", "negative", "2023-10-10 13:10:00"},
-                {"content_6", "user_6", "看了一半卡住了，刷新又看广告", "negative", "2023-10-10 16:30:00"},
+        // 模板生成 500+ 条评论
+        // 保留活动期后（10.08-10.10）美食类负面评论的高密度模式（用于 RAG 归因）
+        String[][] templates = {
+                {"positive", "{keyword}做得真好，学到了"},
+                {"positive", "太棒了，{keyword}强烈推荐"},
+                {"positive", "跟着做了，效果很好"},
+                {"positive", "这个{keyword}内容很实用"},
+                {"positive", "期待更多{keyword}相关视频"},
+                {"positive", "讲得很清楚，{keyword}很容易理解"},
+                {"positive", "看了好几遍了，{keyword}确实是好内容"},
+                {"neutral", "{keyword}还行吧，一般般"},
+                {"neutral", "有没有其他{keyword}推荐"},
+                {"neutral", "先收藏，{keyword}有空再看"},
+                {"neutral", "{keyword}内容中规中矩"},
+                {"neutral", "第一次看这类{keyword}视频"},
+                {"negative", "广告太多了，{keyword}根本没法看"},
+                {"negative", "开头就是广告，{keyword}体验太差"},
+                {"negative", "能不能少点广告，{keyword}都被破坏了"},
+                {"negative", "加载太慢了，{keyword}卡得看不下去"},
+                {"negative", "画质太差了，{keyword}糊得不行"},
+                {"negative", "看了一半就卡住了，{keyword}体验极差"},
+                {"negative", "以前不是这样的，现在{keyword}广告也太多了"},
+                {"negative", "内容还行但广告多得离谱，{keyword}看不下去了"},
         };
-        for (String[] c : foodNegativeComments) {
-            batch.add(new Object[]{c[0], c[1], c[2], c[3], c[4]});
-        }
 
-        // 正常评论（正面/中性，分布在整个月）
-        String[][] normalComments = {
-                {"content_1", "user_5", "教程很详细，跟着学会了", "positive", "2023-10-02 10:00:00"},
-                {"content_1", "user_8", "up主很专业，讲得好", "positive", "2023-10-03 15:20:00"},
-                {"content_2", "user_2", "颜色很好看，种草了", "positive", "2023-10-04 11:30:00"},
-                {"content_2", "user_6", "试了一下确实好用", "positive", "2023-10-05 14:00:00"},
-                {"content_3", "user_1", "操作太秀了", "positive", "2023-10-06 19:30:00"},
-                {"content_3", "user_7", "求教学视频", "neutral", "2023-10-07 20:00:00"},
-                {"content_4", "user_3", "这阵容我也试过，确实能满星", "positive", "2023-10-11 12:00:00"},
-                {"content_4", "user_9", "需要什么练度", "neutral", "2023-10-12 15:30:00"},
-                {"content_5", "user_10", "按照这个方法做出来真的很好吃", "positive", "2023-10-13 18:00:00"},
-                {"content_6", "user_1", "重庆人表示很正宗", "positive", "2023-10-14 12:30:00"},
-                {"content_5", "user_4", "收藏了，周末试试", "neutral", "2023-10-15 10:00:00"},
-                {"content_6", "user_8", "看饿了", "positive", "2023-10-16 20:00:00"},
-                {"content_1", "user_10", "有没有学生党推荐", "neutral", "2023-10-18 09:00:00"},
-                {"content_2", "user_3", "黄皮适合吗", "neutral", "2023-10-20 14:30:00"},
-                {"content_3", "user_6", "期待下期视频", "positive", "2023-10-22 18:00:00"},
-                {"content_4", "user_5", "学到了，之前一直打不过", "positive", "2023-10-25 21:00:00"},
-        };
-        for (String[] c : normalComments) {
-            batch.add(new Object[]{c[0], c[1], c[2], c[3], c[4]});
+        // 已知投诉模式：10.08-10.10 期间美食类视频获得大量负面评论
+        String[] contentIds = {"content_1","content_2","content_3","content_4","content_5","content_6"};
+        String[] contentKeywords = {"美妆教程","口红试色","游戏操作","游戏攻略","家常菜","小吃"};
+
+        for (int i = 0; i < 500; i++) {
+            int ci = random.nextInt(6);
+            String contentId = contentIds[ci];
+            String keyword = contentKeywords[ci];
+            int ui = 1 + random.nextInt(50);
+            String userId = "user_" + ui;
+
+            // 10.08-10.10 期间，美食类(content_5,content_6)的负面评论概率翻倍
+            int day = 1 + random.nextInt(31);
+            boolean isFoodNegativePeriod = (ci >= 4 && day >= 8 && day <= 10);
+
+            String sentiment;
+            if (isFoodNegativePeriod) {
+                sentiment = random.nextDouble() < 0.7 ? "negative" : "neutral";
+            } else {
+                double r = random.nextDouble();
+                sentiment = r < 0.4 ? "positive" : r < 0.7 ? "neutral" : "negative";
+            }
+
+            // 按情感倾向匹配模板
+            List<String> matchingTemplates = new ArrayList<>();
+            for (String[] t : templates) {
+                if (t[0].equals(sentiment)) matchingTemplates.add(t[1]);
+            }
+            String text = matchingTemplates.get(random.nextInt(matchingTemplates.size()))
+                    .replace("{keyword}", keyword);
+
+            int hour = 8 + random.nextInt(16);
+            String ts = String.format("2023-10-%02d %02d:%02d:00", day, hour, random.nextInt(60));
+
+            batch.add(new Object[]{contentId, userId, text, sentiment, ts});
         }
 
         try {
@@ -408,8 +431,8 @@ public class DataInitializer implements CommandLineRunner {
     /* ==================== 归因交叉验证数据 ==================== */
 
     private void extendContentDim() {
-        jdbcTemplate.execute("ALTER TABLE content_dim ADD COLUMN IF NOT EXISTS ad_count INT DEFAULT 0");
-        jdbcTemplate.execute("ALTER TABLE content_dim ADD COLUMN IF NOT EXISTS ad_positions JSON");
+        try { jdbcTemplate.execute("ALTER TABLE content_dim ADD COLUMN ad_count INT DEFAULT 0"); } catch (Exception e) { /* 字段可能已存在 */ }
+        try { jdbcTemplate.execute("ALTER TABLE content_dim ADD COLUMN ad_positions JSON"); } catch (Exception e) { /* 字段可能已存在 */ }
         // 为已有视频设置广告数据：美食类广告多且早，美妆类少量广告，游戏类无广告
         jdbcTemplate.update("UPDATE content_dim SET ad_count=3, ad_positions='[12,30,55]' WHERE content_id IN ('content_5','content_6')");
         jdbcTemplate.update("UPDATE content_dim SET ad_count=1, ad_positions='[50]' WHERE content_id IN ('content_1','content_2')");
@@ -439,7 +462,7 @@ public class DataInitializer implements CommandLineRunner {
         List<Object[]> batch = new ArrayList<>();
 
         for (int day = 1; day <= 31; day++) {
-            for (int u = 1; u <= 20; u++) {
+            for (int u = 1; u <= 50; u++) {
                 String userId = "user_" + u;
                 for (int ci = 0; ci < 6; ci++) {
                     if (random.nextDouble() > 0.4) continue; // 60% 概率产生播放明细

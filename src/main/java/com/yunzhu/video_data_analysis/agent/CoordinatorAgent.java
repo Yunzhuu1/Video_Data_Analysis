@@ -117,37 +117,34 @@ public class CoordinatorAgent {
         String finalQueryResult = queryResult;
         String finalCrossValidation = crossValidation;
 
-        // 步骤5：并行扇出
-        accept(onProgress, "parallel:正在分析评论与生成报告...");
-        log.info("[5/6] Parallel: RAGAgent (cheap) + InsightAgent (strong) + RecAgent (cheap)");
+        // 步骤5：RAG 检索（顺序执行 — 需要 SQL 结果才能搜评论）
+        accept(onProgress, "rag:正在检索用户评论...");
+        log.info("[5/6] RAGAgent (cheap) searching comments...");
+        CommentResult ragResult = ragAgent.analyze(question, finalQueryResult);
 
-        CompletableFuture<CommentResult> ragFuture = CompletableFuture
-                .supplyAsync(() -> ragAgent.analyze(question, finalQueryResult), agentExecutor)
-                .orTimeout(30, TimeUnit.SECONDS)
-                .exceptionally(ex -> {
-                    log.error("RAGAgent failed", ex);
-                    return new CommentResult(List.of(), 0, 0.0, List.of(), "");
-                });
+        // 步骤6：Insight + Rec 真并行（两者都依赖 RAG 结果，互相不依赖）
+        accept(onProgress, "parallel:正在生成分析与建议...");
+        log.info("[6/6] Parallel: InsightAgent (strong) + RecAgent (cheap) (both with RAG context)");
 
-        CompletableFuture<AnalysisReport> insightFuture = ragFuture
-                .thenCompose(ragResult -> CompletableFuture
-                        .supplyAsync(() -> insightAgent.analyze(question, finalQueryResult, schemaContext, ragResult, finalCrossValidation),
-                                agentExecutor)
-                        .orTimeout(60, TimeUnit.SECONDS))
+        CompletableFuture<AnalysisReport> insightFuture = CompletableFuture
+                .supplyAsync(() -> insightAgent.analyze(question, finalQueryResult, schemaContext, ragResult, finalCrossValidation),
+                        agentExecutor)
+                .orTimeout(60, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     log.error("InsightAgent failed", ex);
                     return fallbackReport(question, finalQueryResult);
                 });
 
         CompletableFuture<List<String>> recFuture = CompletableFuture
-                .supplyAsync(() -> recommendationAgent.recommend(question, finalQueryResult, schemaContext), agentExecutor)
+                .supplyAsync(() -> recommendationAgent.recommend(question, finalQueryResult, schemaContext, ragResult),
+                        agentExecutor)
                 .orTimeout(30, TimeUnit.SECONDS)
                 .exceptionally(ex -> {
                     log.error("RecommendationAgent failed", ex);
                     return List.of();
                 });
 
-        // 步骤5：合并
+        // 合并
         accept(onProgress, "merge:正在合并生成最终报告...");
         CompletableFuture.allOf(insightFuture, recFuture).join();
 

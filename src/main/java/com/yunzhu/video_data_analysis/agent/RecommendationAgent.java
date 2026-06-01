@@ -2,6 +2,7 @@ package com.yunzhu.video_data_analysis.agent;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yunzhu.video_data_analysis.dto.CommentResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -40,17 +41,27 @@ public class RecommendationAgent {
     }
 
     public List<String> recommend(String question, String queryResult, String schemaContext) {
-        log.info("RecommendationAgent (cheap model) generating suggestions");
+        return recommend(question, queryResult, schemaContext, null);
+    }
+
+    public List<String> recommend(String question, String queryResult, String schemaContext, CommentResult ragResult) {
+        log.info("RecommendationAgent (cheap model) generating suggestions{}",
+                ragResult != null ? " (with RAG context)" : "");
+
+        String ragSection = formatRagContext(ragResult);
+
         String json = chatClient.prompt()
                 .user(u -> u.text("""
                         用户问题: {question}
                         查询到的数据: {data}
                         Schema上下文（参考）: {schema}
-                        请给出基于数据的运营建议。
+                        {rag}
+                        请给出基于数据的运营建议，最多3条。
                         """)
                         .param("question", question)
                         .param("data", queryResult)
-                        .param("schema", schemaContext))
+                        .param("schema", schemaContext)
+                        .param("rag", ragSection))
                 .call()
                 .content();
 
@@ -61,5 +72,20 @@ public class RecommendationAgent {
             log.warn("Failed to parse recommendations: {}", e.getMessage());
             return List.of();
         }
+    }
+
+    private static String formatRagContext(CommentResult cr) {
+        if (cr == null || cr.getThemes() == null || cr.getThemes().isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("【用户评论反馈参考】\n");
+        sb.append("核心主题: ").append(String.join("、", cr.getThemes())).append("\n");
+        sb.append("负面评论占比: ").append(String.format("%.0f%%", cr.getNegativeRatio() * 100)).append("\n");
+        if (cr.getRepresentativeComments() != null && !cr.getRepresentativeComments().isEmpty()) {
+            sb.append("代表性评论:\n");
+            for (String c : cr.getRepresentativeComments()) {
+                sb.append("- ").append(c).append("\n");
+            }
+        }
+        sb.append("请参考以上用户反馈，给出针对性的运营建议。\n");
+        return sb.toString();
     }
 }

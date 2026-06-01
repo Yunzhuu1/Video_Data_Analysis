@@ -94,7 +94,7 @@ public class AgentController {
         return tokenUsageService.recent(20);
     }
 
-    @GetMapping("/admin/stats")
+    @GetMapping("jiegouhua/stats")
     public Map<String, Object> stats() {
         var tokenStats = tokenUsageService.summary();
         return Map.of(
