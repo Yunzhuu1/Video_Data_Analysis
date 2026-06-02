@@ -19,10 +19,11 @@
               ├─ ② SQLGenerationAgent（SQL 方言自动适配）
               ├─ ③ Self-Correction（基于 SQL 原文 + 数据的精准修正）
               ├─ ④ RAGAgent → Cross-validation（RAG 主题二次验证）
-              └─ ⑤ 并行扇出
-                   ├─ InsightAgent（strong）— 归因报告
-                   ├─ RecAgent（cheap）— 建议（有 RAG 上下文）
-                   └─ DBQA Agent（cheap）— 报告质量检查 + ReAct 修正
+              ├─ ⑤ 并行扇出  
+              │      ├─ InsightAgent（strong）— 归因报告
+              │      └─ RecAgent（cheap）— 建议（有 RAG 上下文）
+              ├─ ⑥ 合并 → report.setRecommendations(recs)
+              └─ ⑦ DBQA（cheap）— 报告质量检查 + ReAct 修正（1 轮）
 ```
 
 ## 功能
