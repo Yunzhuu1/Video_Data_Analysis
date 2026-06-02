@@ -1,6 +1,8 @@
 package com.yunzhu.video_data_analysis.tool;
 
+import com.yunzhu.video_data_analysis.service.SlowQueryService;
 import com.yunzhu.video_data_analysis.service.SqlResultCache;
+import com.yunzhu.video_data_analysis.util.SqlParserValidator;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.jdbc.core.ColumnMapRowMapper;
@@ -24,6 +26,14 @@ public class SqlExecutionTool {
 
     private static final int MAX_ROWS = 100;
     private static final int QUERY_TIMEOUT_SECONDS = 15;
+
+    /** 最近一次被执行的 SQL（供外部读取验证） */
+    private static String lastExecutedSql = "";
+
+    /** 获取最近一次被执行的 SQL 文本，用于 Execution Guidance 校验 */
+    public static String getLastExecutedSql() {
+        return lastExecutedSql;
+    }
     private static final int CIRCUIT_BREAKER_THRESHOLD = 3;
     private final java.util.concurrent.atomic.AtomicInteger consecutiveFailures = new java.util.concurrent.atomic.AtomicInteger(0);
 
@@ -31,12 +41,23 @@ public class SqlExecutionTool {
     private static final Pattern SELECT_PATTERN =
             Pattern.compile("^\\s*(--.*\\n)*\\s*SELECT\\b.*", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
+    /** 慢查询独立日志，便于后期分析 SQL 性能模式 */
+    private static final org.slf4j.Logger slowLog = org.slf4j.LoggerFactory.getLogger("slow-query");
+
     private final JdbcTemplate jdbcTemplate;
     private final SqlResultCache sqlResultCache;
+    private final SqlRulesChecker sqlRulesChecker;
+    private final SqlParserValidator sqlParserValidator;
+    private final SlowQueryService slowQueryService;
 
-    public SqlExecutionTool(JdbcTemplate jdbcTemplate, SqlResultCache sqlResultCache) {
+    public SqlExecutionTool(JdbcTemplate jdbcTemplate, SqlResultCache sqlResultCache,
+                            SqlRulesChecker sqlRulesChecker, SqlParserValidator sqlParserValidator,
+                            SlowQueryService slowQueryService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sqlResultCache = sqlResultCache;
+        this.sqlRulesChecker = sqlRulesChecker;
+        this.sqlParserValidator = sqlParserValidator;
+        this.slowQueryService = slowQueryService;
     }
 
     /**
@@ -62,15 +83,28 @@ public class SqlExecutionTool {
             """)
     public String executeSql(
             @ToolParam(description = "The SQL SELECT statement to execute. Must start with SELECT.") String sql) {
-        // 安全检查：只允许SELECT语句
+        // 安全检查：只允许SELECT语句（正则 + SQL Parser 双重校验）
         if (!SELECT_PATTERN.matcher(sql).matches()) {
             return "Error: Only SELECT statements are allowed. Your statement was rejected: " + sql;
         }
+        String parseError = sqlParserValidator.validate(sql);
+        if (parseError != null) {
+            return "SQL Syntax Error: " + parseError;
+        }
+
+        // 记录 SQL 供外部 Execution Guidance 验证读取
+        lastExecutedSql = sql;
 
         // SQL 结果缓存检查：相同 SQL 在 TTL 内直接返回缓存
         String cached = sqlResultCache.get(sql);
         if (cached != null) {
             return cached;
+        }
+
+        // 逻辑规则检查：基于 sql-rules.yml 的静态分析，在 EXPLAIN 之前执行
+        String ruleWarning = sqlRulesChecker.check(sql);
+        if (ruleWarning != null) {
+            return ruleWarning;
         }
 
         // 预验证：EXPLAIN编译校验 + 查询计划分析
@@ -81,23 +115,31 @@ public class SqlExecutionTool {
                 String extra = (String) row.get("Extra");
                 Number rows = (Number) row.get("rows");
 
-                // 全表扫描（无索引）
+                // 全表扫描
                 if ("ALL".equals(type)) {
-                    return "SQL Performance Warning: Full table scan on '" + row.get("table")
-                            + "' (" + rows + " rows). Add WHERE conditions on indexed columns.";
+                    String table = (String) row.get("table");
+                    long r = rows != null ? rows.longValue() : 0;
+                    slowQueryService.record("FULL_SCAN", sql, table, r);
+                    return "SQL Performance Warning: Full table scan on '" + table
+                            + "' (" + r + " rows). Add WHERE conditions on indexed columns.";
                 }
-                // 使用临时表（GROUP BY/ORDER BY无索引）
+                // 使用临时表
                 if (extra != null && extra.contains("Using temporary")) {
+                    slowQueryService.record("TEMP_TABLE", sql, (String) row.get("table"),
+                            rows != null ? rows.longValue() : 0);
                     return "SQL Performance Warning: Query uses temporary table. "
                             + "Consider indexing GROUP BY/ORDER BY columns or simplifying the query.";
                 }
-                // 文件排序（ORDER BY无索引）
+                // 文件排序
                 if (extra != null && extra.contains("Using filesort")) {
+                    slowQueryService.record("FILESORT", sql, (String) row.get("table"),
+                            rows != null ? rows.longValue() : 0);
                     return "SQL Performance Warning: Query uses filesort. "
                             + "Consider adding indexes for ORDER BY columns.";
                 }
                 // 扫描行数过大
                 if (rows != null && rows.longValue() > 100000) {
+                    slowQueryService.record("LARGE_SCAN", sql, (String) row.get("table"), rows.longValue());
                     return "SQL Performance Warning: Scanning " + rows + " rows. "
                             + "Add more specific WHERE filters to reduce the scan range.";
                 }

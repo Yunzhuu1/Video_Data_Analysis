@@ -1,0 +1,23 @@
+sql-rules:
+  rules:
+    - name: "aggregation_must_filter_event_type"
+      description: "SUM/AVG/COUNT 聚合必须包含 event_type 过滤条件"
+      check: "aggregation AND NOT event_type_filter"
+      tables: ["user_behavior_fact"]
+
+    - name: "join_must_have_on"
+      description: "JOIN 语句必须包含 ON 条件，避免笛卡尔积"
+      check: "join AND NOT on_clause"
+
+    - name: "group_by_in_select"
+      description: "GROUP BY 使用的字段必须在 SELECT 列表中"
+      check: "group_by AND NOT group_by_in_select"
+
+    - name: "limit_required_for_large_table"
+      description: "查询大表时必须带 LIMIT"
+      check: "table_scan AND NOT limit"
+      tables: ["user_behavior_fact", "play_detail"]
+
+    - name: "content_join_creator"
+      description: "查询 content_dim 时如需创作者信息请 JOIN creator_dim"
+      check: "table_content AND NOT join_creator"

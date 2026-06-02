@@ -2,6 +2,7 @@ package com.yunzhu.video_data_analysis.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yunzhu.video_data_analysis.agent.DataAnalysisAgent;
+import com.yunzhu.video_data_analysis.agent.SchemaAgent;
 import com.yunzhu.video_data_analysis.dto.AnalysisReport;
 import com.yunzhu.video_data_analysis.service.SemanticCacheService;
 import com.yunzhu.video_data_analysis.service.TokenUsageService;
@@ -26,15 +27,18 @@ public class AgentController {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final DataAnalysisAgent dataAnalysisAgent;
+    private final SchemaAgent schemaAgent;
     private final SemanticCacheService cacheService;
     private final TokenUsageService tokenUsageService;
     private final Executor agentExecutor;
 
     public AgentController(DataAnalysisAgent dataAnalysisAgent,
+                           SchemaAgent schemaAgent,
                            SemanticCacheService cacheService,
                            TokenUsageService tokenUsageService,
                            @Qualifier("agentTaskExecutor") Executor agentExecutor) {
         this.dataAnalysisAgent = dataAnalysisAgent;
+        this.schemaAgent = schemaAgent;
         this.cacheService = cacheService;
         this.tokenUsageService = tokenUsageService;
         this.agentExecutor = agentExecutor;
@@ -121,5 +125,12 @@ public class AgentController {
     public Map<String, String> clearTokens() {
         tokenUsageService.clear();
         return Map.of("status", "ok");
+    }
+
+    /** 手动刷新 Schema 缓存（DDL 变更后调用） */
+    @PostMapping("/admin/schema/refresh")
+    public Map<String, String> refreshSchema() {
+        schemaAgent.refresh();
+        return Map.of("status", "ok", "message", "Schema cache refreshed");
     }
 }

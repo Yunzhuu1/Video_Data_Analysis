@@ -5,6 +5,7 @@ import com.yunzhu.video_data_analysis.service.SemanticCacheService;
 import com.yunzhu.video_data_analysis.service.TokenUsageService;
 import com.yunzhu.video_data_analysis.tool.MetricQueryTool;
 import com.yunzhu.video_data_analysis.tool.SqlExecutionTool;
+import com.yunzhu.video_data_analysis.util.SqlTemplateMatcher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +51,7 @@ public class DataAnalysisAgent {
     private final RouterAgent routerAgent;
     private final SemanticCacheService cacheService;
     private final TokenUsageService tokenUsageService;
+    private final SqlTemplateMatcher templateMatcher;
 
     public DataAnalysisAgent(@Qualifier("strongChatModel") ChatModel strongChatModel,
                              @Qualifier("cheapChatModel") ChatModel cheapChatModel,
@@ -59,11 +61,13 @@ public class DataAnalysisAgent {
                              SemanticCacheService cacheService,
                              TokenUsageService tokenUsageService,
                              CoordinatorAgent coordinatorAgent,
-                             RouterAgent routerAgent) {
+                             RouterAgent routerAgent,
+                             SqlTemplateMatcher templateMatcher) {
         this.cacheService = cacheService;
         this.tokenUsageService = tokenUsageService;
         this.coordinatorAgent = coordinatorAgent;
         this.routerAgent = routerAgent;
+        this.templateMatcher = templateMatcher;
 
         // 流式聊天：强大模型 + 记忆用于多轮对话
         this.chatClient = ChatClient.builder(strongChatModel)
@@ -122,7 +126,18 @@ public class DataAnalysisAgent {
             log.info("Cache bypassed for: {}", userMessage);
         }
 
-        // 2. 路由
+        // 2. 模板匹配：预定义的高频查询直接执行，不走 LLM
+        String templateSql = templateMatcher.matchAndFill(userMessage);
+        if (templateSql != null) {
+            log.info("Template matched, executing without LLM");
+            String templateResult = templateMatcher.execute(templateSql);
+            AnalysisReport templateReport = new AnalysisReport();
+            templateReport.setSummary("查询结果:\n" + templateResult);
+            templateReport.setPeriod("—");
+            return templateReport;
+        }
+
+        // 3. 路由
         AnalysisReport result;
         if (routerAgent.isSimple(userMessage)) {
             log.info("Routing to SIMPLE path (cheap model)");

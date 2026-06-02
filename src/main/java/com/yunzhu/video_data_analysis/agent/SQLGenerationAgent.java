@@ -1,5 +1,6 @@
 package com.yunzhu.video_data_analysis.agent;
 
+import com.yunzhu.video_data_analysis.service.SqlDialectService;
 import com.yunzhu.video_data_analysis.tool.MetricQueryTool;
 import com.yunzhu.video_data_analysis.tool.SqlExecutionTool;
 import org.slf4j.Logger;
@@ -9,29 +10,26 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+/**
+ * SQL 生成 Agent。System Prompt 中的 SQL 规则由 {@link SqlDialectService}
+ * 根据数据库类型动态生成，不硬编码 MySQL 方言。
+ */
 @Component
 public class SQLGenerationAgent {
 
     private static final Logger log = LoggerFactory.getLogger(SQLGenerationAgent.class);
 
-    private static final String SYSTEM_PROMPT = """
+    private static final String PROMPT_TEMPLATE = """
             SQL专家。按步骤执行：
             1. 涉及指标→先getMetricFormula
             2. 写SQL→executeSql
             3. 报错→修正重试×3
             4. 返回数据
 
-            规则：SELECT only。JSON用->>。时间直接比timestamp。
-            COALESCE防NULL。executeSql限100行，超限用GROUP BY+LIMIT。
-            表结构见下方上下文，勿臆测字段。
-
-            【性能优化】聚合查询(SUM/AVG/COUNT/GROUP BY)优先查 metric_daily 表。
-            metric_daily(date,category,total_plays,total_play_duration,total_likes,total_comments)
-            包含每日每分类的预聚合数据，仅数千行。
-            只有当 metric_daily 没有所需粒度时(如按创作者/用户维度)，才回退到 user_behavior_fact。
+            {sql_rules}
 
             【自查】返回前检查SQL逻辑：
-            - 聚合查询是否遗漏了WHERE/event_type过滤？
+            - 聚合查询是否遗漏了必要的WHERE过滤条件？
             - JOIN条件是否正确匹配了外键？
             发现问题则用executeSql重新执行修正后的SQL。
             """;
@@ -40,9 +38,15 @@ public class SQLGenerationAgent {
 
     public SQLGenerationAgent(@Qualifier("strongChatModel") ChatModel chatModel,
                               SqlExecutionTool sqlExecutionTool,
-                              MetricQueryTool metricQueryTool) {
+                              MetricQueryTool metricQueryTool,
+                              SqlDialectService dialectService) {
+        String sqlRules = dialectService.isInitialized()
+                ? dialectService.getSqlRules()
+                : "规则：SELECT only。简单SQL先查metric_daily预聚合表。";
+        String systemPrompt = PROMPT_TEMPLATE.replace("{sql_rules}", sqlRules);
+
         this.chatClient = ChatClient.builder(chatModel)
-                .defaultSystem(SYSTEM_PROMPT)
+                .defaultSystem(systemPrompt)
                 .defaultTools(sqlExecutionTool, metricQueryTool)
                 .build();
     }
@@ -54,8 +58,6 @@ public class SQLGenerationAgent {
 
     /**
      * 执行时可选来自执行指导的反馈。
-     * 如果 {@code previousFeedback} 非空，模型会将其作为
-     * 附加上下文来指导修正。
      */
     public String execute(String question, String schemaContext, String previousFeedback) {
         log.info("SQLGenerationAgent (strong) executing query{}",

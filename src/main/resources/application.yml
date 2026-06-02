@@ -48,3 +48,4 @@ app:
 logging:
   level:
     org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor: DEBUG
+    slow-query: WARN

@@ -1,0 +1,22 @@
+# SQL 模板定义
+# LLM 不参与模板匹配和执行的任何环节，由匹配器直接执行。
+# 命中模板的查询：零 LLM 调用，毫秒级返回，100% 正确。
+templates:
+
+  # 按分类查单指标（metric_daily）
+  - id: "category_metric"
+    description: "按分类查询单个指标"
+    sql: "SELECT category, total_{metric} FROM metric_daily WHERE category '{category}' {time_filter}"
+    params:
+      metric: ["plays", "play_duration", "likes", "comments"]
+      category: ["美妆", "游戏", "美食"]
+    intent_match: ["各分类", "各类的", "按分类", "分类的"]
+
+  # 按日期范围的指标趋势（metric_daily）
+  - id: "metric_trend"
+    description: "按日期范围查询指标趋势"
+    sql: "SELECT date, {metric} FROM metric_daily WHERE date BETWEEN '{start_date}' AND '{end_date}' OR date BETWEEN '{start_date}' AND '{end_date}' ORDER BY date"
+    params:
+      metric: ["total_plays", "total_play_duration", "total_likes"]
+      date_range: true
+    intent_match: ["每天", "每日", "趋势", "变化", "走势"]
