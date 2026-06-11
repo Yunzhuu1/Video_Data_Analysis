@@ -65,7 +65,8 @@
       "Bash(find \"D:\\\\develop\\\\repository\\\\redis\\\\clients\" -name \"jedis*.jar\" 2>/dev/null | head -3)",
       "Bash(javap -cp 'D:\\\\develop\\\\repository\\\\org\\\\springframework\\\\ai\\\\spring-ai-redis-store\\\\1.1.6\\\\spring-ai-redis-store-1.1.6.jar' 'org.springframework.ai.vectorstore.redis.RedisVectorStore$MetadataField')",
       "Bash(javap -c -cp \"D:\\\\develop\\\\repository\\\\org\\\\springframework\\\\ai\\\\spring-ai-model\\\\1.1.6\\\\spring-ai-model-1.1.6.jar\" org.springframework.ai.chat.memory.ChatMemory)",
-      "Bash(javap -c -cp \"D:\\\\develop\\\\repository\\\\org\\\\springframework\\\\ai\\\\spring-ai-client-chat\\\\1.1.6\\\\spring-ai-client-chat-1.1.6.jar\" org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor)"
+      "Bash(javap -c -cp \"D:\\\\develop\\\\repository\\\\org\\\\springframework\\\\ai\\\\spring-ai-client-chat\\\\1.1.6\\\\spring-ai-client-chat-1.1.6.jar\" org.springframework.ai.chat.client.advisor.api.BaseChatMemoryAdvisor)",
+      "WebFetch(domain:www.infoq.cn)"
     ]
   }
 }

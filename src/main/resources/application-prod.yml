@@ -1,0 +1,11 @@
+spring:
+  ai:
+    chat:
+      client:
+        observations:
+          log-prompt: false
+          log-completion: false
+
+app:
+  data-initializer:
+    enabled: false

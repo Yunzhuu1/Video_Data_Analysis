@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +31,7 @@ import java.util.Random;
  * 使用固定随机种子 (42) 保证结果可重现。
  */
 @Component
+@ConditionalOnProperty(prefix = "app.data-initializer", name = "enabled", havingValue = "true")
 public class DataInitializer implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataInitializer.class);
@@ -105,7 +107,7 @@ public class DataInitializer implements CommandLineRunner {
         createPlayDetailTable();
         insertPlayDetail();
         seedComments();
-        loadCommentsIntoMilvus();
+        loadCommentsIntoVectorStore();
 
         log.info("测试数据初始化完成");
     }
@@ -500,12 +502,12 @@ public class DataInitializer implements CommandLineRunner {
         }
     }
 
-    private void loadCommentsIntoMilvus() {
+    private void loadCommentsIntoVectorStore() {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     "SELECT content_id, text, sentiment, created_at FROM comment_content");
             if (rows.isEmpty()) {
-                log.info("  Milvus: 无评论数据需加载");
+                log.info("  Redis VectorStore: 无评论数据需加载");
                 return;
             }
 
@@ -521,9 +523,9 @@ public class DataInitializer implements CommandLineRunner {
                         .build());
             }
             vectorStore.add(docs);
-            log.info("  Milvus: {} 条评论已加载到向量库", docs.size());
+            log.info("  Redis VectorStore: {} 条评论已加载到向量库", docs.size());
         } catch (Exception e) {
-            log.warn("  Milvus 加载失败 (请确认 Milvus 是否运行): {}", e.getMessage());
+            log.warn("  Redis VectorStore 加载失败 (请确认 Redis Stack 是否运行): {}", e.getMessage());
         }
     }
 

@@ -2,6 +2,7 @@ package com.yunzhu.video_data_analysis.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -19,10 +20,15 @@ public class SlowQueryService {
     private static final Logger log = LoggerFactory.getLogger(SlowQueryService.class);
 
     private final JdbcTemplate jdbcTemplate;
+    private final boolean enabled;
 
-    public SlowQueryService(JdbcTemplate jdbcTemplate) {
+    public SlowQueryService(JdbcTemplate jdbcTemplate,
+                            @Value("${app.slow-query.enabled:true}") boolean enabled) {
         this.jdbcTemplate = jdbcTemplate;
-        ensureTable();
+        this.enabled = enabled;
+        if (enabled) {
+            ensureTable();
+        }
     }
 
     private void ensureTable() {
@@ -39,6 +45,7 @@ public class SlowQueryService {
     }
 
     public void record(String issueType, String sql, String tableName, long rows) {
+        if (!enabled) return;
         jdbcTemplate.update(
             "INSERT INTO slow_query_log (sql_text, issue_type, rows_examined, table_name, created_at) VALUES (?, ?, ?, ?, ?)",
             truncate(sql, 500), issueType, rows, tableName, LocalDateTime.now()
@@ -48,6 +55,7 @@ public class SlowQueryService {
     /** 每周汇总 TOP 慢查询模式 */
     @Scheduled(cron = "0 0 2 * * MON")
     public void weeklySummary() {
+        if (!enabled) return;
         List<Map<String, Object>> stats = jdbcTemplate.queryForList(
             "SELECT issue_type, table_name, COUNT(*) as cnt, "
             + "ROUND(AVG(rows_examined)) as avg_rows "

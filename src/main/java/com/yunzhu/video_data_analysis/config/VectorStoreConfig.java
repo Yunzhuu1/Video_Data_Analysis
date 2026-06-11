@@ -11,7 +11,7 @@ import redis.clients.jedis.JedisPooled;
 
 /**
  * 创建 Redis 向量存储 Bean。
- * 替换了之前基于 Milvus 的实现，减少部署依赖。
+ * 使用 Redis Stack 的向量检索能力，减少部署依赖。
  * <p>
  * 需要显式声明 metadata 字段，否则 RediSearch 索引无法对这些字段做过滤。
  */

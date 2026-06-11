@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/video_data_analysis?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:root}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  ai:
+    openai:
+      base-url: ${AI_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${AI_MODEL:deepseek-chat}
+
+app:
+  ai:
+    strong-model: ${AI_STRONG_MODEL:deepseek-chat}
+    cheap-model: ${AI_CHEAP_MODEL:deepseek-chat}
+  embedding:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_EMBED_MODEL:nomic-embed-text}
+  data-initializer:
+    enabled: ${DATA_INITIALIZER_ENABLED:true}

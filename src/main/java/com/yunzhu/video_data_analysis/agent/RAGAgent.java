@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
  * <ol>
  *   <li><b>查询重写</b> — 将指标问题（“完播率为什么下降”）
  *       桥接到体验搜索词（“广告 卡顿 画质 差评”）</li>
- *   <li><b>向量搜索</b> — Milvus ANN top-20 → <b>LLM重排序</b> → top-5</li>
+ *   <li><b>向量搜索</b> — Redis VectorStore top-10 → <b>LLM重排序</b> → top-5</li>
  *   <li><b>自我反思</b> — 检查检索到的评论是否真正解释了
  *       指标变化，然后再注入到 InsightAgent</li>
  * </ol>
@@ -33,7 +33,7 @@ public class RAGAgent {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final String DOC_TYPE = "comment";
-    private static final int MILVUS_TOP_K = 10;
+    private static final int VECTOR_TOP_K = 10;
     private static final int RERANK_TOP_K = 5;
 
     /* ==================== 提示词 ==================== */
@@ -80,7 +80,7 @@ public class RAGAgent {
      * 三阶段RAG管道：
      * <ol>
      *   <li>为评论搜索重写查询</li>
-     *   <li>Milvus向量搜索 → LLM重排序</li>
+     *   <li>Redis VectorStore向量搜索 → LLM重排序</li>
      *   <li>自我反思 → 返回结果或空</li>
      * </ol>
      */
@@ -91,17 +91,17 @@ public class RAGAgent {
         String searchQuery = rewriteQuery(question, queryResult);
         log.info("RAGAgent: rewritten query=\"{}\"", searchQuery);
 
-        // 阶段2：Milvus搜索 + LLM重排序
-        log.info("RAGAgent: stage 2/3 — Milvus search (top-{}) + reranker", MILVUS_TOP_K);
+        // 阶段2：Redis VectorStore搜索 + LLM重排序
+        log.info("RAGAgent: stage 2/3 — Redis VectorStore search (top-{}) + reranker", VECTOR_TOP_K);
         List<Document> candidates = vectorStore.similaritySearch(
                 SearchRequest.builder()
                         .query(searchQuery)
-                        .topK(MILVUS_TOP_K)
+                        .topK(VECTOR_TOP_K)
                         .filterExpression("doc_type == '" + DOC_TYPE + "'")
                         .build());
 
         if (candidates.isEmpty()) {
-            log.info("RAGAgent: no candidates from Milvus");
+            log.info("RAGAgent: no candidates from Redis VectorStore");
             return emptyResult();
         }
 
